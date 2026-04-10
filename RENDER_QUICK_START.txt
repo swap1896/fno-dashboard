@@ -1,0 +1,274 @@
+🚀 RENDER DEPLOYMENT - QUICK START
+═════════════════════════════════════════════════════════════════════════════
+
+⏱️  TIME: 15 minutes total
+💰 COST: FREE (750 hours/month)
+
+STEP 1: Get Your 3 Zerodha Credentials (5 min)
+═════════════════════════════════════════════════════════════════════════════
+
+Go to: https://kite.trade
+1. Login
+2. Settings (top right) → API Console
+3. Create new app → Get API Key + Secret
+4. Click "Generate session"
+5. After login, copy request_token from redirect URL
+6. Run this Python code:
+
+---
+
+import hashlib
+import requests
+
+key = "YOUR_API_KEY"
+secret = "YOUR_API_SECRET"
+req_token = "REQUEST_TOKEN_FROM_REDIRECT"
+
+data = f"{key}{req_token}{secret}"
+checksum = hashlib.sha256(data.encode()).hexdigest()
+
+r = requests.post("https://api.kite.trade/session/token", data={
+    "api_key": key,
+    "request_token": req_token,
+    "checksum": checksum
+})
+
+print("ACCESS_TOKEN:", r.json()['data']['access_token'])
+
+---
+
+SAVE THESE 3 VALUES:
+  □ API_KEY: ____________________________
+  □ API_SECRET: ________________________
+  □ ACCESS_TOKEN: ______________________
+
+
+STEP 2: Push Code to GitHub (3 min)
+═════════════════════════════════════════════════════════════════════════════
+
+Terminal commands:
+
+# Navigate to your code folder
+cd ~/fno-dashboard
+
+# Initialize git
+git init
+
+# Create .gitignore
+cat > .gitignore << 'EOF'
+__pycache__/
+*.pyc
+.env
+.env.local
+.DS_Store
+venv/
+EOF
+
+# Add all files
+git add .
+
+# Commit
+git commit -m "FNO Intelligence Dashboard - Live Zerodha API"
+
+# Create new repo on GitHub: github.com/new
+# Then:
+git remote add origin https://github.com/YOUR_USERNAME/fno-dashboard
+git branch -M main
+git push -u origin main
+
+DONE: Your code is on GitHub ✓
+
+
+STEP 3: Create Render Account & Connect GitHub (2 min)
+═════════════════════════════════════════════════════════════════════════════
+
+1. Go to: https://render.com
+2. Click "Sign up"
+3. Choose "Sign up with GitHub"
+4. Authorize Render to access your repos
+5. Done ✓
+
+
+STEP 4: Deploy on Render (3 min)
+═════════════════════════════════════════════════════════════════════════════
+
+1. In Render dashboard, click "New +"
+2. Select "Web Service"
+3. Click "Deploy from a Git repository"
+4. Search for "fno-dashboard" repo → Select it
+5. Fill in form:
+
+   Name: fno-dashboard
+   Environment: Python 3
+   Region: Oregon (or nearest)
+   Branch: main
+   Build Command: pip install -r requirements.txt
+   Start Command: gunicorn app:app
+
+6. Scroll down and click "Create Web Service"
+7. Render starts building (takes ~2 minutes)
+
+
+STEP 5: Add Environment Variables (2 min)
+═════════════════════════════════════════════════════════════════════════════
+
+While Render is building:
+
+1. In your service dashboard, scroll to "Environment"
+2. Click "Add Environment Variable"
+3. Add these 4 variables (one by one):
+
+   Name: ZERODHA_API_KEY
+   Value: YOUR_API_KEY_FROM_STEP_1
+   
+   Name: ZERODHA_API_SECRET
+   Value: YOUR_API_SECRET_FROM_STEP_1
+   
+   Name: ZERODHA_ACCESS_TOKEN
+   Value: YOUR_ACCESS_TOKEN_FROM_STEP_1
+   
+   Name: PORT
+   Value: 10000
+
+4. Click "Save" after each
+5. Render auto-redeploys with these variables
+
+WAIT FOR BUILD TO COMPLETE (green checkmark) ✓
+
+
+STEP 6: Test Your Live API (1 min)
+═════════════════════════════════════════════════════════════════════════════
+
+Render gives you a URL like:
+  https://fno-dashboard.onrender.com
+
+Test it (open in browser or terminal):
+  curl https://fno-dashboard.onrender.com/health
+
+You should see:
+  {"status":"healthy","zerodha_ready":true,"has_data":false}
+
+If you see "zerodha_ready":true → YOU'RE LIVE! ✓
+
+
+STEP 7: Connect Dashboard to Cloud API (2 min)
+═════════════════════════════════════════════════════════════════════════════
+
+Edit fno-dashboard-index.html:
+
+Find this line (around line 50):
+  const BASE_URL = 'http://localhost:5000';
+
+Replace with:
+  const BASE_URL = 'https://fno-dashboard.onrender.com';
+
+Save file.
+
+Push to GitHub:
+  git add fno-dashboard-index.html
+  git commit -m "Update dashboard API URL for Render"
+  git push origin main
+
+Render auto-redeploys (takes 1 minute).
+
+
+🎉 YOU'RE LIVE!
+═════════════════════════════════════════════════════════════════════════════
+
+Your dashboard is now live at:
+  https://fno-dashboard.onrender.com
+
+What happens next:
+  1. Every 5 minutes, background process fetches live NIFTY options data
+  2. Calculates max pain, OI clusters, IV skew
+  3. Generates trading signal
+  4. Dashboard shows the signal
+  5. You analyze price action + make manual trading decision
+
+Access from anywhere:
+  • Desktop: https://fno-dashboard.onrender.com
+  • Mobile: Same URL in mobile browser
+  • Add to home screen for app-like experience
+
+
+✅ CHECKLIST
+═════════════════════════════════════════════════════════════════════════════
+
+PRE-DEPLOYMENT:
+  □ Got 3 Zerodha credentials
+  □ Pushed code to GitHub
+  □ Created Render account
+
+DEPLOYMENT:
+  □ Created Render Web Service
+  □ Build completed successfully
+  □ Added 4 environment variables
+  □ Health check returns zerodha_ready:true
+  □ Updated dashboard API_URL
+  □ Pushed changes to GitHub
+  □ Dashboard shows live signal
+
+POST-DEPLOYMENT:
+  □ Tested dashboard in browser
+  □ Clicked "Refresh Data" button
+  □ See NIFTY spot price + signal
+  □ Ready to paper trade
+
+
+🚀 NEXT STEPS
+═════════════════════════════════════════════════════════════════════════════
+
+1. Paper trade the signals for 1 week
+2. Log all trades (entry, exit, P&L)
+3. Review win rate
+4. Trade real capital if consistent
+
+
+⚠️  IMPORTANT NOTES
+═════════════════════════════════════════════════════════════════════════════
+
+• Zerodha tokens expire after 24 hours
+  → Regenerate weekly to avoid "token expired" errors
+  → Update Render environment variable
+  → Render auto-redeploys
+
+• First load takes 5-10 seconds
+  → Background process is fetching live data
+  → Subsequent refreshes are faster
+
+• Render free tier limitations
+  → 750 hours/month = 24/7 always-on (perfect!)
+  → Spins down if no requests for 15 min (doesn't apply to our setup)
+  → 512MB RAM (plenty for our app)
+
+• Your data
+  → Stored in memory (not persistent)
+  → No problem - we fetch fresh from Zerodha API every 5 min
+
+
+📞 TROUBLESHOOTING
+═════════════════════════════════════════════════════════════════════════════
+
+Problem: "Build failed"
+Solution: Check Render logs for Python errors, verify requirements.txt
+
+Problem: "zerodha_ready": false
+Solution: Check environment variables are set correctly in Render
+
+Problem: Dashboard shows no data
+Solution: Click "Refresh Data" button, wait 5 seconds
+
+Problem: "Token expired"
+Solution: Regenerate access token in Zerodha, update Render env var
+
+Problem: Very slow loading
+Solution: Render free tier may be slower - wait 30 seconds first time
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+You're 15 minutes away from live trading signals.
+
+Start with STEP 1 right now. 🚀
+
+═════════════════════════════════════════════════════════════════════════════

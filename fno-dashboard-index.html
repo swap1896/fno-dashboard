@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FNO Intelligence Dashboard</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f5f5;
+            color: #1a1a1a;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-left h1 { font-size: 28px; margin-bottom: 8px; }
+        .header-left p { color: #666; font-size: 14px; }
+        .refresh-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .refresh-btn:hover { background: #45a049; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #1a1a1a;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: #666; font-size: 14px; }
+        .metric-value { font-weight: 600; font-size: 16px; color: #1a1a1a; }
+        .metric-subtext { font-size: 12px; color: #999; margin-top: 4px; }
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+        .badge-bullish { background: #e8f5e9; color: #2e7d32; }
+        .badge-bearish { background: #ffebee; color: #c62828; }
+        .badge-neutral { background: #f5f5f5; color: #666; }
+        .badge-success { background: #e3f2fd; color: #1565c0; }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .table th {
+            background: #f9f9f9;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .table tr:hover { background: #fafafa; }
+        .highlight { color: #4CAF50; font-weight: 600; }
+        .danger { color: #d32f2f; }
+        .strike-card {
+            background: #f9f9f9;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            border-left: 4px solid #4CAF50;
+        }
+        .strike-card.warning { border-left-color: #ff9800; }
+        .strike-card.danger { border-left-color: #d32f2f; }
+        .grid-2 { grid-template-columns: 1fr 1fr; }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .signal-box {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 16px;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+        .signal-box .title {
+            font-weight: 600;
+            color: #1565c0;
+            margin-bottom: 8px;
+        }
+        .signal-box .setup {
+            font-size: 15px;
+            color: #1a1a1a;
+            font-weight: 500;
+            margin: 8px 0;
+        }
+        .signal-box .notes {
+            font-size: 13px;
+            color: #666;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+        .note-item {
+            margin: 4px 0;
+        }
+        .note-item::before {
+            content: "✓ ";
+            color: #4CAF50;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border: 1px solid #ef5350;
+        }
+        .row { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+        .row > * { flex: 1; min-width: 300px; }
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .input-group input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .input-group button {
+            padding: 10px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .timestamp {
+            font-size: 12px;
+            color: #999;
+            margin-top: 8px;
+        }
+        .divider { border-top: 1px solid #e0e0e0; margin: 16px 0; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Mock data generator - replace with real Zerodha API calls
+        const generateMockData = () => ({
+            spotPrice: 23850,
+            expiryDate: "22 April 2026",
+            maxPain: 23700,
+            putCallRatio: 1.24,
+            totalPutOI: 152400000,
+            totalCallOI: 122800000,
+            ivSkew: 2.2,
+            putIV: 24.3,
+            callIV: 22.1,
+            strikes: [
+                { strike: 23600, type: 'PE', oi: 15200000, iv: 24.8, bid: 45, ask: 48, volume: 8500000 },
+                { strike: 23700, type: 'PE', oi: 12800000, iv: 24.2, bid: 38, ask: 41, volume: 7200000 },
+                { strike: 23800, type: 'CE', oi: 8500000, iv: 21.9, bid: 52, ask: 55, volume: 4100000 },
+                { strike: 23900, type: 'CE', oi: 9200000, iv: 22.5, bid: 42, ask: 45, volume: 3800000 },
+            ],
+            recentTrades: [
+                { date: '20 Apr', entry: 23750, exit: 23800, pnl: 1250, type: 'CE', status: 'closed' },
+                { date: '19 Apr', entry: 23600, exit: 23650, pnl: 2100, type: 'PE', status: 'closed' },
+                { date: '18 Apr', entry: 23700, exit: 23700, pnl: -500, type: 'CE', status: 'closed' },
+            ]
+        });
+
+        const FNODashboard = () => {
+            const [data, setData] = useState(generateMockData());
+            const [loading, setLoading] = useState(false);
+            const [apiKey, setApiKey] = useState(localStorage.getItem('zerodha_api_key') || '');
+            const [error, setError] = useState('');
+            const chartRef = useRef(null);
+
+            const refreshData = async () => {
+                setLoading(true);
+                try {
+                    // Replace with real Zerodha API call
+                    // const response = await fetch('/api/nifty-options', {
+                    //   headers: { 'Authorization': `Bearer ${apiKey}` }
+                    // });
+                    // const newData = await response.json();
+                    // setData(newData);
+                    
+                    // Mock delay
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    setData(generateMockData());
+                    setError('');
+                } catch (err) {
+                    setError('Failed to fetch data. Check API key.');
+                }
+                setLoading(false);
+            };
+
+            const saveApiKey = () => {
+                localStorage.setItem('zerodha_api_key', apiKey);
+                setError('API key saved');
+                setTimeout(() => setError(''), 3000);
+            };
+
+            useEffect(() => {
+                // Auto-refresh every 60 seconds
+                const interval = setInterval(refreshData, 60000);
+                return () => clearInterval(interval);
+            }, [apiKey]);
+
+            const bidAskSpread = (bid, ask) => ((ask - bid) / bid * 100).toFixed(2);
+            const oiBullishBearish = data.totalPutOI > data.totalCallOI ? 'Slight bearish' : 'Slight bullish';
+            const highestOI = data.strikes.reduce((max, s) => s.oi > max.oi ? s : max);
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <div className="header-left">
+                            <h1>FNO Intelligence Dashboard</h1>
+                            <p>NIFTY 50 • Spot: ₹{data.spotPrice} • Expiry: {data.expiryDate}</p>
+                        </div>
+                        <button className="refresh-btn" onClick={refreshData} disabled={loading}>
+                            {loading ? 'Refreshing...' : 'Refresh Data'}
+                        </button>
+                    </div>
+
+                    {error && <div className="error">{error}</div>}
+
+                    <div className="card" style={{ marginBottom: '20px' }}>
+                        <div className="card-title">Zerodha API Configuration</div>
+                        <div className="input-group">
+                            <input
+                                type="password"
+                                placeholder="Enter Zerodha API key..."
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                            />
+                            <button onClick={saveApiKey}>Save</button>
+                        </div>
+                        <p style={{ fontSize: '12px', color: '#999' }}>
+                            API key is stored locally in your browser. Get it from your Zerodha console.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-2">
+                        <div className="card">
+                            <div className="card-title">Positioning overview</div>
+                            <div className="metric">
+                                <span className="metric-label">Max pain</span>
+                                <span className="metric-value">₹{data.maxPain}</span>
+                            </div>
+                            <div className="metric">
+                                <span className="metric-label">Put/call ratio</span>
+                                <span className="metric-value">{data.putCallRatio.toFixed(2)}</span>
+                            </div>
+                            <div className="divider"></div>
+                            <div style={{ marginTop: '12px' }}>
+                                <div className="metric-label">Directional bias</div>
+                                <div style={{ marginTop: '8px' }}>
+                                    <span className={`badge ${data.totalPutOI > data.totalCallOI ? 'badge-bearish' : 'badge-bullish'}`}>
+                                        {oiBullishBearish}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <div className="card-title">IV skew & sentiment</div>
+                            <div className="metric">
+                                <span className="metric-label">Put side IV</span>
+                                <span className="metric-value">{data.putIV.toFixed(1)}</span>
+                            </div>
+                            <div className="metric">
+                                <span className="metric-label">Call side IV</span>
+                                <span className="metric-value">{data.callIV.toFixed(1)}</span>
+                            </div>
+                            <div className="metric">
+                                <span className="metric-label">Skew (Put - Call)</span>
+                                <span className={`metric-value ${data.ivSkew > 0 ? 'danger' : 'highlight'}`}>
+                                    {data.ivSkew > 0 ? '+' : ''}{data.ivSkew.toFixed(1)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card" style={{ marginBottom: '20px' }}>
+                        <div className="card-title">Strike analysis - Highest OI concentration</div>
+                        {data.strikes.map((strike, idx) => (
+                            <div key={idx} className={`strike-card ${strike.oi === highestOI.oi ? 'warning' : ''}`}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: 600, fontSize: '16px' }}>
+                                        ₹{strike.strike} {strike.type}
+                                    </span>
+                                    <span className="highlight">{(strike.oi / 1000000).toFixed(1)}L OI</span>
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#666', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                    <div>IV: {strike.iv.toFixed(1)}% | Bid: ₹{strike.bid}</div>
+                                    <div>Vol: {(strike.volume / 1000000).toFixed(1)}L | Ask: ₹{strike.ask}</div>
+                                    <div>Spread: {bidAskSpread(strike.bid, strike.ask)}%</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="row">
+                        <div className="card">
+                            <div className="card-title">Open Interest distribution</div>
+                            <div style={{ height: '200px', position: 'relative', marginTop: '16px' }}>
+                                <canvas id="oiChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <div className="card-title">Recent manual trades</div>
+                            <table className="table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Type</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>P&L</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.recentTrades.map((trade, idx) => (
+                                        <tr key={idx}>
+                                            <td>{trade.date}</td>
+                                            <td>{trade.type}</td>
+                                            <td>{trade.entry}</td>
+                                            <td>{trade.exit}</td>
+                                            <td className={trade.pnl > 0 ? 'highlight' : 'danger'}>
+                                                {trade.pnl > 0 ? '+' : ''}₹{trade.pnl}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div className="card">
+                        <div className="card-title">Manual trading signal</div>
+                        <div className="signal-box">
+                            <div className="title">Current setup recommendation</div>
+                            <div className="setup">Bear put spread: Sell ₹{data.maxPain - 100} PE | Buy ₹{data.maxPain - 200} PE</div>
+                            <div className="notes">
+                                <div className="note-item">High OI support below max pain strike</div>
+                                <div className="note-item">Tight bid-ask spreads = lower slippage</div>
+                                <div className="note-item">Premium defensible with {data.ivSkew > 1.5 ? 'elevated' : 'normal'} IV skew</div>
+                                <div className="note-item">Execution: Your decision based on price action</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ textAlign: 'center', marginTop: '40px', paddingBottom: '20px', color: '#999', fontSize: '13px' }}>
+                        <p>Last updated: {new Date().toLocaleTimeString()}</p>
+                        <p>FNO Intelligence Dashboard • Manual execution model</p>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<FNODashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>
