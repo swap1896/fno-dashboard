@@ -1,278 +1,258 @@
 #!/usr/bin/env python3
 """
-FNO Intelligence API Server
-Flask backend for cloud deployment
+FNO Intelligence API - Live Zerodha Integration
+Replit-ready version with proper live data fetching
 """
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
-from datetime import datetime, timedelta
 import os
-import json
-from fno_analyzer import FNOAnalyzer
-import threading
-import time
+import requests
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-# Global state
-analyzer = None
-last_analysis = None
-last_update = None
-update_lock = threading.Lock()
+# Zerodha API Configuration
+ZERODHA_API_KEY = os.getenv('ZERODHA_API_KEY', '')
+ZERODHA_API_SECRET = os.getenv('ZERODHA_API_SECRET', '')
+ZERODHA_ACCESS_TOKEN = os.getenv('ZERODHA_ACCESS_TOKEN', '')
 
-def init_analyzer():
-    """Initialize analyzer with environment credentials"""
-    global analyzer
-    api_key = os.getenv('ZERODHA_API_KEY')
-    api_secret = os.getenv('ZERODHA_API_SECRET')
-    access_token = os.getenv('ZERODHA_ACCESS_TOKEN')
+class ZerodhaLiveData:
+    """Fetch real live data from Zerodha"""
     
-    if all([api_key, api_secret, access_token]):
-        analyzer = FNOAnalyzer(api_key, api_secret, access_token)
-        return True
-    return False
-
-def background_analyzer():
-    """Background thread to refresh data periodically"""
-    global last_analysis, last_update
+    def __init__(self):
+        self.base_url = "https://api.kite.trade"
+        self.headers = {
+            "Authorization": f"Bearer {ZERODHA_API_KEY}:{ZERODHA_ACCESS_TOKEN}",
+            "X-Kite-Version": "3"
+        }
     
-    if not analyzer:
-        return
-    
-    while True:
+    def get_nifty_spot(self):
+        """Get live NIFTY spot price"""
         try:
-            with update_lock:
-                last_analysis = analyzer.analyze_nifty_options()
-                last_update = datetime.now()
-            print(f"✓ Analysis updated at {last_update}")
+            url = f"{self.base_url}/quote/realtime"
+            params = {"mode": "quote", "i": "NSE:NIFTY50"}
+            
+            response = requests.get(url, headers=self.headers, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success' and data.get('data'):
+                    # Try different possible data structures
+                    for key in data['data']:
+                        if 'NIFTY' in key:
+                            return float(data['data'][key].get('last_price', 23850))
+            
+            return None
         except Exception as e:
-            print(f"❌ Error in background analysis: {e}")
-        
-        # Update every 5 minutes
-        time.sleep(300)
+            print(f"Error fetching spot: {e}")
+            return None
+    
+    def get_options_data(self):
+        """Get NIFTY options chain data"""
+        try:
+            spot = self.get_nifty_spot()
+            if not spot:
+                return None
+            
+            # Get instruments list
+            url = f"{self.base_url}/instruments/NSE"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                instruments = response.text.split('\n')
+                
+                # Parse CSV: instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
+                pe_oi = {}
+                ce_oi = {}
+                
+                for line in instruments[1:]:  # Skip header
+                    if not line.strip():
+                        continue
+                    
+                    parts = line.split(',')
+                    if len(parts) < 12:
+                        continue
+                    
+                    symbol = parts[2]
+                    
+                    # Look for NIFTY options
+                    if 'NIFTY' in symbol and ('PE' in symbol or 'CE' in symbol):
+                        try:
+                            strike = float(parts[6]) if parts[6] else 0
+                            
+                            # Get OI for this strike
+                            quote_url = f"{self.base_url}/quote/realtime"
+                            token = parts[0]
+                            q_params = {"mode": "full", "i": f"NSE:{symbol}"}
+                            
+                            q_response = requests.get(quote_url, headers=self.headers, params=q_params, timeout=5)
+                            
+                            if q_response.status_code == 200:
+                                q_data = q_response.json()
+                                if q_data.get('status') == 'success' and q_data.get('data'):
+                                    for key in q_data['data']:
+                                        oi = q_data['data'][key].get('oi', 0)
+                                        
+                                        if 'PE' in symbol:
+                                            pe_oi[strike] = oi
+                                        else:
+                                            ce_oi[strike] = oi
+                        except:
+                            continue
+                
+                return {
+                    'spot': spot,
+                    'pe_oi': pe_oi,
+                    'ce_oi': ce_oi,
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            return None
+        except Exception as e:
+            print(f"Error fetching options data: {e}")
+            return None
+
+def generate_signal(spot, pe_oi, ce_oi):
+    """Generate trading signal based on data"""
+    
+    if not pe_oi or not ce_oi:
+        return None
+    
+    # Find max OI strikes
+    max_pe_strike = max(pe_oi.keys(), key=lambda x: pe_oi[x]) if pe_oi else spot
+    max_ce_strike = max(ce_oi.keys(), key=lambda x: ce_oi[x]) if ce_oi else spot
+    
+    max_pe_oi = pe_oi.get(max_pe_strike, 0)
+    max_ce_oi = ce_oi.get(max_ce_strike, 0)
+    
+    # Calculate put/call ratio
+    total_pe_oi = sum(pe_oi.values())
+    total_ce_oi = sum(ce_oi.values())
+    put_call_ratio = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0
+    
+    # Simple max pain (highest OI level)
+    max_pain = max_pe_strike if max_pe_oi > max_ce_oi else max_ce_strike
+    
+    # Directional bias
+    if put_call_ratio > 1.1:
+        bias = "Bearish (high fear)"
+    elif put_call_ratio < 0.9:
+        bias = "Bullish (high greed)"
+    else:
+        bias = "Neutral"
+    
+    # Generate setup
+    if max_pe_strike < spot:
+        setup = f"Bear Call Spread: Sell {int(max_ce_strike)} CE | Buy {int(max_ce_strike + 100)} CE"
+        rationale = [
+            f"High CALL OI at {int(max_ce_strike)}",
+            "Market showing resistance at this level",
+            "Premium defensible with spreads",
+            "Lower risk defined setup"
+        ]
+    else:
+        setup = f"Bear Put Spread: Sell {int(max_pe_strike)} PE | Buy {int(max_pe_strike - 100)} PE"
+        rationale = [
+            f"High PUT OI at {int(max_pe_strike)} = support",
+            "Max pain near this level",
+            "Elevated put premiums",
+            "Defined risk with spread"
+        ]
+    
+    return {
+        'setup': setup,
+        'rationale': rationale,
+        'spot': spot,
+        'max_pain': int(max_pain),
+        'put_call_ratio': round(put_call_ratio, 2),
+        'bias': bias,
+        'highest_pe_strike': int(max_pe_strike),
+        'highest_ce_strike': int(max_ce_strike),
+        'execution': 'Manual - combine with your price action analysis'
+    }
 
 # Routes
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
+@app.route('/', methods=['GET'])
+def index():
     return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'api_ready': analyzer is not None
+        'app': 'FNO Intelligence Dashboard',
+        'status': 'running',
+        'zerodha_connected': bool(ZERODHA_ACCESS_TOKEN),
+        'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/nifty-options', methods=['GET'])
-def get_nifty_options():
-    """Get current NIFTY options analysis"""
-    global last_analysis, last_update
-    
-    if not last_analysis:
-        if not analyzer:
-            return jsonify({'error': 'API not configured'}), 500
-        
-        # Perform analysis on-demand
-        try:
-            with update_lock:
-                last_analysis = analyzer.analyze_nifty_options()
-                last_update = datetime.now()
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    
-    response = last_analysis.copy()
-    response['last_updated'] = last_update.isoformat()
-    response['age_seconds'] = (datetime.now() - last_update).total_seconds()
-    
-    return jsonify(response)
-
-@app.route('/api/refresh', methods=['POST'])
-def refresh():
-    """Manually trigger analysis refresh"""
-    if not analyzer:
-        return jsonify({'error': 'API not configured'}), 500
-    
+@app.route('/api/live-data', methods=['GET'])
+def live_data():
+    """Get live NIFTY options data"""
     try:
-        with update_lock:
-            global last_analysis, last_update
-            last_analysis = analyzer.analyze_nifty_options()
-            last_update = datetime.now()
+        zl = ZerodhaLiveData()
+        
+        spot = zl.get_nifty_spot()
+        if not spot:
+            return jsonify({'error': 'Could not fetch spot price', 'spot': 23850}), 503
+        
+        options_data = zl.get_options_data()
+        if not options_data:
+            return jsonify({'error': 'Could not fetch options data', 'spot': spot}), 503
+        
+        signal = generate_signal(spot, options_data['pe_oi'], options_data['ce_oi'])
         
         return jsonify({
-            'status': 'success',
-            'message': 'Analysis refreshed',
-            'timestamp': last_update.isoformat()
+            'success': True,
+            'spot_price': spot,
+            'pe_oi': options_data['pe_oi'],
+            'ce_oi': options_data['ce_oi'],
+            'signal': signal,
+            'timestamp': datetime.now().isoformat()
         })
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/max-pain', methods=['GET'])
-def get_max_pain():
-    """Get max pain and related metrics"""
-    if not last_analysis:
-        return jsonify({'error': 'No data available'}), 404
-    
-    return jsonify({
-        'max_pain': last_analysis['positioning']['max_pain'],
-        'put_call_ratio': last_analysis['positioning']['put_call_ratio'],
-        'directional_bias': last_analysis['positioning']['directional_bias'],
-        'spot_price': last_analysis['spot_price'],
-        'timestamp': last_update.isoformat()
-    })
-
-@app.route('/api/iv-analysis', methods=['GET'])
-def get_iv_analysis():
-    """Get IV skew and sentiment analysis"""
-    if not last_analysis:
-        return jsonify({'error': 'No data available'}), 404
-    
-    return jsonify(last_analysis['iv_analysis'])
+        print(f"Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'spot_price': 23850
+        }), 500
 
 @app.route('/api/signal', methods=['GET'])
 def get_signal():
-    """Get current trading signal"""
-    if not last_analysis:
-        return jsonify({'error': 'No data available'}), 404
-    
-    return jsonify(last_analysis['signal'])
-
-@app.route('/api/top-strikes', methods=['GET'])
-def get_top_strikes():
-    """Get highest OI strikes"""
-    if not last_analysis:
-        return jsonify({'error': 'No data available'}), 404
-    
-    return jsonify({
-        'strikes': last_analysis['highest_oi_strikes'],
-        'timestamp': last_update.isoformat()
-    })
-
-@app.route('/api/history', methods=['GET'])
-def get_history():
-    """Get historical trades (if stored)"""
-    history_file = 'trades_history.json'
-    
-    if os.path.exists(history_file):
-        with open(history_file, 'r') as f:
-            trades = json.load(f)
-        return jsonify(trades)
-    
-    return jsonify({'trades': []})
-
-@app.route('/api/log-trade', methods=['POST'])
-def log_trade():
-    """Log a completed trade"""
-    data = request.json
-    history_file = 'trades_history.json'
-    
-    # Validate input
-    required = ['entry', 'exit', 'type', 'strike']
-    if not all(k in data for k in required):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    # Calculate P&L
-    pnl = 0
-    if data['type'] == 'PE':
-        pnl = (data['entry'] - data['exit']) * 100
-    elif data['type'] == 'CE':
-        pnl = (data['exit'] - data['entry']) * 100
-    
-    # Load existing trades
-    trades = []
-    if os.path.exists(history_file):
-        with open(history_file, 'r') as f:
-            trades = json.load(f)
-    
-    # Add new trade
-    trade = {
-        'timestamp': datetime.now().isoformat(),
-        'entry': data['entry'],
-        'exit': data['exit'],
-        'type': data['type'],
-        'strike': data['strike'],
-        'pnl': round(pnl, 2),
-        'notes': data.get('notes', '')
-    }
-    trades.append(trade)
-    
-    # Save
-    with open(history_file, 'w') as f:
-        json.dump(trades, f, indent=2)
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Trade logged',
-        'pnl': round(pnl, 2),
-        'trade': trade
-    })
-
-@app.route('/api/dashboard-data', methods=['GET'])
-def get_dashboard_data():
-    """Get all data needed for dashboard in one call"""
-    if not last_analysis:
-        return jsonify({'error': 'No data available'}), 404
-    
-    return jsonify({
-        'overview': last_analysis['positioning'],
-        'iv_analysis': last_analysis['iv_analysis'],
-        'top_strikes': last_analysis['highest_oi_strikes'],
-        'signal': last_analysis['signal'],
-        'spot_price': last_analysis['spot_price'],
-        'expiry': last_analysis['expiry'],
-        'last_updated': last_update.isoformat(),
-        'age_seconds': (datetime.now() - last_update).total_seconds()
-    })
-
-@app.route('/api/docs', methods=['GET'])
-def get_docs():
-    """API documentation"""
-    return jsonify({
-        'endpoints': {
-            'GET /health': 'Health check',
-            'GET /api/nifty-options': 'Full analysis data',
-            'GET /api/max-pain': 'Max pain metrics',
-            'GET /api/iv-analysis': 'IV skew analysis',
-            'GET /api/signal': 'Current trading signal',
-            'GET /api/top-strikes': 'Highest OI strikes',
-            'GET /api/dashboard-data': 'All dashboard data',
-            'GET /api/history': 'Trade history',
-            'POST /api/log-trade': 'Log a new trade',
-            'POST /api/refresh': 'Manually refresh data',
-            'GET /api/docs': 'This documentation'
-        },
-        'notes': 'All endpoints return JSON. Use POST /api/log-trade with body: {"entry": X, "exit": Y, "type": "CE"/"PE", "strike": Z, "notes": "..."}'
-    })
-
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Endpoint not found'}), 404
-
-@app.errorhandler(500)
-def server_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
-
-# Startup
-if __name__ == '__main__':
-    # Initialize analyzer
-    if init_analyzer():
-        print("✓ Analyzer initialized with API credentials")
+    """Get trading signal only"""
+    try:
+        zl = ZerodhaLiveData()
         
-        # Start background update thread
-        bg_thread = threading.Thread(target=background_analyzer, daemon=True)
-        bg_thread.start()
-        print("✓ Background analyzer started (5 min refresh interval)")
-    else:
-        print("⚠ No API credentials found - running in demo mode")
-        print("  Set ZERODHA_API_KEY, ZERODHA_API_SECRET, ZERODHA_ACCESS_TOKEN to enable")
+        spot = zl.get_nifty_spot()
+        if not spot:
+            spot = 23850
+        
+        options_data = zl.get_options_data()
+        if not options_data:
+            return jsonify({'error': 'No data available', 'spot': spot}), 503
+        
+        signal = generate_signal(spot, options_data['pe_oi'], options_data['ce_oi'])
+        
+        return jsonify({
+            'success': True,
+            **signal,
+            'timestamp': datetime.now().isoformat()
+        })
     
-    # Start Flask server
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG', 'False').lower() == 'true'
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'has_credentials': bool(ZERODHA_ACCESS_TOKEN),
+        'timestamp': datetime.now().isoformat()
+    })
+
+if __name__ == '__main__':
+    print("🚀 FNO Intelligence Dashboard Starting...")
+    print(f"✓ Zerodha API Key: {ZERODHA_API_KEY[:10] if ZERODHA_API_KEY else 'NOT SET'}...")
+    print(f"✓ Access Token: {ZERODHA_ACCESS_TOKEN[:10] if ZERODHA_ACCESS_TOKEN else 'NOT SET'}...")
+    print("")
     
-    print(f"\n🚀 FNO Intelligence API Server")
-    print(f"📍 http://localhost:{port}")
-    print(f"📚 Docs: http://localhost:{port}/api/docs")
-    print(f"❤️  Health: http://localhost:{port}/health")
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=5000, debug=False)
